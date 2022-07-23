@@ -29,12 +29,15 @@ static u16 uartTxPolling(UartRsrc_t *pRsrc);
 static u8 uartRxMonitor(UartRsrc_t *pRsrc);
 static u16 uartRxFetchLine(UartRsrc_t *pRsrc, char* line, u16 len);
 static u16 uartRxFetchFrame(UartRsrc_t *pRsrc, u8* frame, u16 frameLen);
-static void uartTxSendString(UartRsrc_t *pRsrc, const char* FORMAT_ORG, ...);
 static u16 uartTxSendFrame(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
 static s16 uartSend(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
+
+#if	UART_ALL_FUNCTION
+static void uartTxSendString(UartRsrc_t *pRsrc, const char* FORMAT_ORG, ...);
 static s16 uartSendSync(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
 static void uartTxSendStringSync(UartRsrc_t *pRsrc, const char* FORMAT_ORG, ...);
-/* Private functions ---------------------------------------------------------*/
+#endif
+static s16 TjcSendCmd(UartRsrc_t* p, const char* FORMAT_ORG, ...);
 static void uartStartRecv(UartRsrc_t *pRsrc);
 static u8 uartTestRestartRecv(UartRsrc_t *pRsrc);
 /*******************************************************************************
@@ -78,9 +81,14 @@ void setupUartDev(
 	
 	pDev->TxSendFrame = uartTxSendFrame;
 	pDev->Send = uartSend;
+	pDev->TJC_Send = TjcSendCmd;
+
+#if	UART_ALL_FUNCTION
 	pDev->SendSync = uartSendSync;
 	pDev->SendStr = uartTxSendString;
 	pDev->SendStrSync = uartTxSendStringSync;
+#endif
+
 	pDev->StartRcv = uartStartRecv;
 	pDev->TestRestartRcv = uartTestRestartRecv;
 	
@@ -132,6 +140,7 @@ static s16 uartSend(UartRsrc_t *pRsrc, const u8* BUF, u16 len){
 	return sentBytes;
 }
 
+#if	UART_ALL_FUNCTION
 static s16 uartSendSync(UartRsrc_t *pRsrc, const u8* BUF, u16 len){
 	u16 sentBytes;
 	for(sentBytes = 0; 1; ){
@@ -167,18 +176,7 @@ static void uartTxSendStringSync(UartRsrc_t *pRsrc, const char* FORMAT_ORG, ...)
 	
 	uartSendSync(pRsrc, (u8*)buff, bytes);
 }
-
-//void uartTxMakeFrame(u8* p, const u8* BUF, u16 len, u16 crc){
-//	*p = UART_FRAM_HEAD&0xff;	p++;
-//	*p = (UART_FRAM_HEAD>>8)&0xff;	p++;
-//	*p = (UART_FRAM_HEAD>>16)&0xff;	p++;
-//	memcpy(p, BUF, len);	p+=len;
-//	*p = crc&0xff;	p++;
-//	*p = (crc>>8)&0xff;	p++;
-//	*p = UART_FRAM_END&0xff;	p++;
-//	*p = (UART_FRAM_END>>8)&0xff;	p++;
-//	*p = (UART_FRAM_END>>16)&0xff;
-//}
+#endif
 
 static u16 uartTxSendFrame(UartRsrc_t *pRsrc, const u8* BUF, u16 len){
 	u16 crc;
@@ -208,7 +206,6 @@ static u8 uartRxMonitor(UartRsrc_t *pRsrc){
 	UART_HandleTypeDef *huart = pRsrc->huart;
 
   /* Disable RXNE, PE and ERR (Frame error, noise error, overrun error) interrupts */
-  //CLEAR_BIT(huart->Instance->CR1, (USART_CR1_RXNEIE | USART_CR1_PEIE));
 	__HAL_UART_DISABLE_IT(huart, UART_IT_RXNE|UART_IT_PE);
 	bytesReceived = huart->RxXferSize - huart->RxXferCount;
 	if(bytesReceived > 0){
@@ -216,7 +213,6 @@ static u8 uartRxMonitor(UartRsrc_t *pRsrc){
 		huart->pRxBuffPtr = pRsrc->rxNxtBuf;
 		huart->RxXferCount = pRsrc->rxBufLen;
 	}
-	//SET_BIT(huart->Instance->CR1, (USART_CR1_RXNEIE | USART_CR1_PEIE));
 	__HAL_UART_ENABLE_IT(huart, UART_IT_RXNE|UART_IT_PE);
 
 	if(bytesReceived <= 0)	return 0;
@@ -269,12 +265,6 @@ u16 fetchLineFromRingBuffer(RINGBUFF_T* rb, char* line, u16 len){
 				memmove(line, &line[i], (lineLen>len?len:lineLen));
 				line[lineLen] = 0;
 			}
-			
-//			for(j=0; j<lineLen && (i+j)<len; j++){
-//				line[j] = line[i+j];
-//			}
-//			line[lineLen] = 0;
-			
 			ret = 1;
 			break;
 		}
@@ -356,6 +346,29 @@ static u16 uartRxFetchFrame(UartRsrc_t *pRsrc, u8* frame, u16 frameLen){
 	}
 
 	return 0;
+}
+
+static s16 TjcSendCmd(UartRsrc_t* p, const char* FORMAT_ORG, ...){
+	u8 buf[100] = {0};
+	s32 len;
+	va_list ap;
+	s16 bytes;
+	//take string
+	if(FORMAT_ORG == NULL)	return -1;
+	memset(buf, 0, 100);
+	va_start(ap, FORMAT_ORG);
+	bytes = vsnprintf((char*)buf, 100, FORMAT_ORG, ap);
+	va_end(ap);
+
+	len = strlen((char*)buf);
+	if(len <= 0)	return -2;
+	buf[len++] = 0xff;
+	buf[len++] = 0xff;
+	buf[len++] = 0xff;
+	uartSend(p, buf, len);	// load to ringbuffer
+//	p->uart.TxPolling(&p->uart.rsrc);	// send out
+//	HAL_Delay(5);
+	return bytes;
 }
 
 /******************* (C) COPYRIGHT 2007 STMicroelectronics *****END OF FILE****/

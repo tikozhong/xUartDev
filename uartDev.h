@@ -17,7 +17,9 @@
 #include "misc.h"
 #include "ring_buffer.h"
 
-#define UART_TX_BUFF_LEN	64
+#define UART_TX_BUFF_LEN	64		// send buffer size, in byte
+#define UART_ALL_FUNCTION	0		// [0]keep tiny usage
+
 
 /* Exported types ------------------------------------------------------------*/
 typedef struct{
@@ -49,11 +51,14 @@ typedef struct{
 	u16 (*RxFetchFrame)	(UartRsrc_t *pRsrc, u8* frame, u16 frameLen);
 	
 	s16 (*Send)(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
+	u16 (*TxSendFrame)	(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
+
+	s16 (*TJC_Send)(UartRsrc_t* p, const char* CMD, ...);
+#if	UART_ALL_FUNCTION
 	s16 (*SendSync)(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
-	
 	void (*SendStr)(UartRsrc_t *pRsrc, const char* FORMAT_ORG, ...);
 	void (*SendStrSync)(UartRsrc_t *pRsrc, const char* FORMAT_ORG, ...);
-	u16 (*TxSendFrame)	(UartRsrc_t *pRsrc, const u8* BUF, u16 len);
+#endif
 }UartDev_t;
 
 /* Exported variables --------------------------------------------------------*/
